@@ -56,10 +56,10 @@ for more details, run `python train_ppo.py -h`
 
 ## License
 
-coming soon
+This project is licensed under the Apache License, Version 2.0. See [LICENSE](https://github.com/minnsou/suzume-jong/blob/master/LICENSE) for the full license text.
 
 ## Reference
 
-[official site](https://sugorokuya.jp/p/suzume-jong/)
+[Suzume-Jong official site](https://sugorokuya.jp/p/suzume-jong/)
 
 [Open AI baselines](https://github.com/openai/baselines)
