@@ -5,15 +5,17 @@ import os
 import argparse
 
 import numpy as np
+import pandas as pd
 import keras
 from keras.models import Sequential, load_model
 from keras.utils import np_utils
-from keras.layers import Dense, GRU, Conv2D, Flatten, Masking, Dropout
+from keras.layers import Dense, GRU, Conv2D, Flatten, Masking, Dropout, SimpleRNN, LSTM
 
 import mahjong_utils
 from mahjong_utils import NUM_SAME_TILE, KIND_TILE, round_point2vec
 
 def make_features(num_players, model_type, round_num, round_point, points, dealer):
+    # [1 round_num, 2 round_point, 3 points, 4 dealer] to vector(or plane)
     if model_type == 'cnn':
         num_planes = 5 + 2 * num_players
         features = np.zeros((num_planes, NUM_SAME_TILE, KIND_TILE))
@@ -26,26 +28,34 @@ def make_features(num_players, model_type, round_num, round_point, points, deale
         )
     elif model_type == 'gru':
         features = np.zeros((6 * num_players + 1))
+        # round_num
         features[:4*num_players] = np_utils.to_categorical(
             round_num,
             num_players * 4
         )
+        # round_point
         features[4*num_players] = round_point
+        # point of each player
         for j in range(num_players):
             features[4*num_players+1+j] = points[f'player{j}']
+        # dealer
         features[-num_players:] = np_utils.to_categorical(
             int(dealer[-1]),
             num_players
         )
-    elif model_type == 'dense':
+    elif model_type == 'dense' or model_type == "rnn" or model_type == 'lstm':
         features = np.zeros((27 * num_players + 22))
+        # round_num
         features[:4*num_players] = np_utils.to_categorical(
             round_num,
             num_players * 4
         )
+        # round_point
         features[4*num_players:4*num_players+22] = round_point2vec(round_point)
+        # point of each player
         features[4*num_players+22:26*num_players+22] = \
             mahjong_utils.points2vec(num_players, points)
+        # dealer
         features[-num_players:] = np_utils.to_categorical(
             int(dealer[-1]),
             num_players
@@ -62,7 +72,7 @@ def log2features(json_file, model_type):
         features = np.zeros((4 * num_players, num_planes, NUM_SAME_TILE, KIND_TILE))
     elif model_type == 'gru':
         features = np.zeros((4 * num_players, 6 * num_players + 1))
-    elif model_type == 'dense':
+    elif model_type == 'dense' or model_type == 'rnn' or model_type == 'lstm':
         features = np.zeros((4 * num_players, 27 * num_players + 22))
     for i in range(num_players * 4):
         reset_dict = log_dict[f'{i} reset']
@@ -103,6 +113,8 @@ def log2features(json_file, model_type):
     rank = mahjong_utils.get_rank(final_point, first_dealer_num, 'player0')
     if model_type == 'gru':
         features = features.reshape(1, 4 * num_players, 6 * num_players + 1)
+    elif model_type == 'lstm' or model_type == 'rnn':
+        features = features.reshape(1, 4 * num_players,  27 * num_players + 22)
     return features, rank
 
 def make_model(num_players, model_type):
@@ -119,11 +131,19 @@ def make_model(num_players, model_type):
         # マスキングなし
         # model.add(GRU(units=64, return_sequences=True, input_shape=input_shape))
         model.add(GRU(units=64))
+    elif model_type == 'rnn':
+        input_shape = (None, 27 * num_players + 22)
+        model.add(SimpleRNN(units=64, input_shape=input_shape, return_sequences=True))
+        model.add(SimpleRNN(units=64))
+    elif model_type == 'lstm':
+        input_shape = (None, 27 * num_players + 22)        
+        model.add(LSTM(units=64, input_shape=input_shape, return_sequences=True))
+        model.add(LSTM(units=64))
     elif model_type == 'cnn':
         input_shape = (5 + 2 * num_players, NUM_SAME_TILE, KIND_TILE)
         model.add(Conv2D(filters=64, kernel_size=3, input_shape=input_shape))
         model.add(Conv2D(filters=64, kernel_size=3, padding='same'))
-        model.add(Flatten())        
+        model.add(Flatten())
     model.add(Dense(units=32, activation='relu'))
     model.add(Dense(units=1))
     model.compile(loss='mean_squared_error', optimizer='sgd')
@@ -145,20 +165,22 @@ def train(model_type, num_players, player_gamma, opponent_gamma):
             x = np.zeros((1, 4 * num_players, 6 * num_players + 1))
         elif model_type == 'dense':
             x = np.zeros((1, 27 * num_players + 22))
+        elif model_type == 'lstm' or model_type == 'rnn':
+            x = np.zeros((1, 4 * num_players, 27 * num_players + 22))
         y = []
         for i, name in enumerate(pathlib.Path(dirname).iterdir()):
             features, rank = log2features(name, model_type)
             x = np.vstack([x, features])
             if model_type == 'cnn' or model_type == 'dense':
                 y += [rank for j in range(4 * num_players)]
-            elif model_type == 'gru':
+            elif model_type == 'gru' or model_type == 'rnn' or model_type == 'lstm':
                 y.append(rank)
         x = x[1:]
         np.save(f'./save_rew_pred/x_{train_name}', x)
         np.save(f'./save_rew_pred/y_{train_name}', y)
     model = make_model(num_players, model_type)
-    epochs = 300
-    batch_size = 32
+    epochs = 100
+    batch_size = 128
     history = model.fit(
         x,
         y,
@@ -168,13 +190,13 @@ def train(model_type, num_players, player_gamma, opponent_gamma):
         validation_split=0.1
     )
     model.save(f'{train_name}_{epochs}.h5')
-
+    pd.DataFrame(history.history).to_csv(f'{train_name}_{epochs}.csv')
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-p", "--num_players", help="number of players (default 2)", type=int, default=2)
-    parser.add_argument("-pg", "--player_gamma", help="player discount rate (default '09')", type=str, default='09')    
+    parser.add_argument("-pg", "--player_gamma", help="player discount rate (default '09'), using when getting logs", type=str, default='09')    
     parser.add_argument("-og", "--opponent_gamma", help="opponent player discount rate (default '09')", type=str, default='09')    
     parser.add_argument("-m", "--model_type", help="model type (default 'dense')", type=str, default='dense')
     parser.add_argument('--play', default=False, action='store_true')
@@ -305,11 +327,8 @@ def main():
             x[0, 9, :, 9] = 1 # player2 point 42
             x[0, 11, :, 5] = 1 # player3 point 22
             x[0, 13, :, 9] = 1 # player4 point 44
-
         print(model.predict(x))
 
 
 if __name__ == '__main__':
     main()
-    
-# TODO: これをsuzume_env/main.pyに組み込む

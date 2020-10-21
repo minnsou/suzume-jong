@@ -12,15 +12,33 @@ import mahjong_utils
 from mahjong_utils import KIND_TILE_WITH_RED, MAX_LEN_HAND, NUM_SAME_TILE
 from mahjong_utils import hand2show_str, hand2plane, get_rank, KIND_TILE
 import reward_predict
+from keras.utils import np_utils
 
 class SuzumeEnv(gym.Env):
-    def __init__(self, process_idx=0, num_players=2, gamma_str='09',
+    def __init__(self, num_players=2, gamma_str='09',
                  obs_mode=1, has_dealer=False, pseudo_reward=False,
                  reward_scale=1, reward_mode=1, do_complete_game=False,
-                 rank_reward_scale=1, make_log=False, model_type='',
+                 rank_reward_scale=1, model_type='',
                  numpy_seed=0, eval_mode=False, debug=True):
+
+        '''
+        num_players: number of players
+        gamma_str: opponent play style(06, 09 or random)
+        obs_mode: observation mode (more details in 'make_obs')
+        has_dealer: if False, select dealer randomly
+        pseudo_reward: if True, get 0.1 when having 1 meld
+        reward_scale: reward is 'point / reward_scale'
+        reward_mode: reward mode (more details in 'make_reward')
+        do_complete_game: if False, no 'round_num' variable
+        rank_reward_scale: rank reward scale
+        model_type: global reward prediction's model name(dense, cnn, or gru)
+        numpy_seed: numpy random seeed
+        eval_mode: if True, when no discard tile in hand, discard random tile
+        debug: if True, show variables
+        '''
+
         np.random.seed(numpy_seed)
-        self.process_idx = process_idx
+        #self.process_idx = process_idx
         self.num_players = num_players
         self.action_space = gym.spaces.Discrete(KIND_TILE_WITH_RED)
         self.debug = debug
@@ -39,12 +57,12 @@ class SuzumeEnv(gym.Env):
             self.round_num = 0
             self.final_round_num = self.num_players * 4 - 1
             self.spec = gym.envs.registration.EnvSpec(f'Suzume{num_players}-v1')
-            self.make_log = make_log
+            #self.make_log = make_log
         else:
             self.has_dealer = has_dealer
             self.reward_scale = reward_scale
             self.spec = gym.envs.registration.EnvSpec(f'Suzume{num_players}-v0')
-            self.make_log = False
+            #self.make_log = False
         if self.has_dealer:
             self.first_dealer_num =  str(np.random.randint(self.num_players))
             self.dealer = 'player' + str(self.first_dealer_num)
@@ -59,10 +77,20 @@ class SuzumeEnv(gym.Env):
                 NUM_SAME_TILE,
                 KIND_TILE_WITH_RED
             )
-        elif obs_mode == 2:
+        elif obs_mode == 2 or obs_mode == 7:
             self.obs_hand_shape = (NUM_SAME_TILE, KIND_TILE)
         elif obs_mode == 3:
             self.obs_hand_shape = (NUM_SAME_TILE, KIND_TILE_WITH_RED)
+        elif obs_mode == 8:
+            self.obs_hand_shape = (KIND_TILE, NUM_SAME_TILE)
+        elif obs_mode == 9:
+            self.obs_hand_shape = (NUM_SAME_TILE+1, KIND_TILE+2)
+        elif obs_mode == 10:
+            self.obs_hand_shape = (KIND_TILE+2, NUM_SAME_TILE+1)
+        elif obs_mode == 11:
+            self.obs_hand_shape = (KIND_TILE+2, 2*NUM_SAME_TILE+5)
+        elif obs_mode == 12:
+            self.obs_hand_shape = (KIND_TILE+2, 27*self.num_players+8)
         if obs_mode == 1 or obs_mode == 2:
             self.observation_space = spaces.Dict({
                 'dora': spaces.Box(
@@ -84,7 +112,7 @@ class SuzumeEnv(gym.Env):
                     dtype=np.int32,
                 ),
             })
-        elif obs_mode == 3:
+        elif obs_mode == 3 or (7 <= obs_mode <= 12):
             self.observation_space = spaces.Box(
                 low=0,
                 high=1,
@@ -116,7 +144,7 @@ class SuzumeEnv(gym.Env):
         self.eval_mode = eval_mode
         if reward_mode == 4 or reward_mode == 5:
             from keras.models import load_model
-            model_name = f'./save_rew_pred/{model_type}_{num_players}_09_09_30.h5'
+            model_name = f'./save_rew_pred/{model_type}_{num_players}_09_09_100.h5'
             self.model = load_model(model_name)
             self.model_type = model_type
             self.before_round_num = 0
@@ -151,6 +179,24 @@ class SuzumeEnv(gym.Env):
         #print('plane', plane)
         return plane
 
+    def get_remaining_tiles(self, player):
+        count_tiles = []
+        for tile in range(KIND_TILE_WITH_RED):
+            if tile == 18 or tile == 19:
+                max_num = 4
+            elif tile % 2 == 0:
+                max_num = 3
+            else:
+                max_num = 1
+            num_tile = self.hands[player].count(tile)
+            for p in self.players:
+                num_tile += self.discarded_tiles[p].count(tile)
+            if self.dora == tile:
+                num_tile += 1
+            for i in range(max_num-num_tile):
+                count_tiles.append(tile)
+        return count_tiles
+
     def draw_hands(self):
         for player in self.players:
             self.hands[player] = sorted(self.wall[:MAX_LEN_HAND - 1])
@@ -180,8 +226,26 @@ class SuzumeEnv(gym.Env):
         obs_mode 6 (numpy)
         dealer(4x11), round_num(2x4x11), dora(4x11), points(bucket, 2Px4x11)
         player0 hand(4x11), discards(Px4x11)
-        '''
+
+        obs_mode 7 (numpy)
+        player0 hand(4x11)
+
+        obs_mode 8 (numpy)
+        player0 hand(11x4)
+
+        obs_mode 9 (numpy)
+        player0 hand(5x13)
+
+        obs_mode 10 (numpy)
+        player0 hand(13x5)
+
+        obs_mode 11 (numpy)
+        player0 hand, dora, remainig hand(13x(2xNUM_SAME_TILE+5))
+
+        obs_mode 12 (numpy)
+        player0 hand, dora(8), points(22P), round_num(4P), discard_tile(P) (13x(27xP+8))
         
+        '''
         if self.obs_mode == 1 or self.obs_mode == 2:
             obs = {
                 'dora': np.zeros(KIND_TILE_WITH_RED),
@@ -234,6 +298,27 @@ class SuzumeEnv(gym.Env):
             obs[4+2*self.num_players] = hand2plane(self.hands['player0'], 2)
             for i in range(self.num_players):
                 obs[-(self.num_players-i)] = hand2plane(self.discarded_tiles[f'player{i}'], 2)
+        elif self.obs_mode == 7:
+            obs = hand2plane(self.hands['player0'], 2)
+        elif self.obs_mode == 8:
+            obs = hand2plane(self.hands['player0'], 2).T
+        elif self.obs_mode == 9:
+            obs = hand2plane(self.hands['player0'], 4)
+        elif self.obs_mode == 10:
+            obs = hand2plane(self.hands['player0'], 4).T
+        elif self.obs_mode == 11:
+            remaining_tiles = self.get_remaining_tiles('player0')
+            remaining_plane = hand2plane(remaining_tiles, 4).T
+            hand_plane = hand2plane(self.hands['player0'], 5, self.dora)
+            obs = np.concatenate([hand_plane, remaining_plane], 1)
+        elif self.obs_mode == 12:
+            hand_dora_plane = hand2plane(self.hands['player0'], 5, self.dora)
+            point_vec = mahjong_utils.points2vec(self.num_players, self.points)
+            point_plane = np.tile(point_vec, 13).reshape(13, 22 * self.num_players)
+            round_vec = np_utils.to_categorical(self.round_num, self.num_players * 4)
+            round_plane = np.tile(round_vec, 13).reshape(13, self.num_players * 4)
+            discards_plane = mahjong_utils.discards2exist_plane(self.discarded_tiles, self.players)
+            obs = np.concatenate([hand_dora_plane, point_plane, round_plane, discards_plane], 1)
         return obs
  
     # 'player' draws a tile from the wall and calcurate point
@@ -495,6 +580,9 @@ class SuzumeEnv(gym.Env):
                 elif self.model_type == 'dense':
                     before_x = before_x.reshape(1, 27 * self.num_players + 22)
                     after_x = after_x.reshape(1, 27 * self.num_players + 22)
+                elif self.model_type == 'lstm' or self.model_type == 'rnn':
+                    before_x = before_x.reshape(1, 1, 27 * self.num_players + 22)
+                    after_x = after_x.reshape(1, 1, 27 * self.num_players + 22)
                 before_pred_rank = self.model.predict(before_x)
                 after_pred_rank = self.model.predict(after_x)
                 diff = before_pred_rank - after_pred_rank
@@ -505,7 +593,7 @@ class SuzumeEnv(gym.Env):
             if self.reward_mode == 5:
                 if point >= 0 or finish_kyoku:
                     point = 0
-            return (point / self.reward_scale) + diff
+            return (point + diff) / self.reward_scale
 
     def look_ahead(self):
         if self.do_complete_game:

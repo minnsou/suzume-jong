@@ -1,5 +1,7 @@
 import itertools
 import pickle
+import sys
+import os
 import math
 import numpy as np
 
@@ -10,9 +12,13 @@ MAX_LEN_HAND = 6
 
 hand_to_optimal_dicts06 = []
 hand_to_optimal_dicts09 = []
+
+dirpath = '/home/t_shimizu/suzume-jong/'
 for dora in range(KIND_TILE_WITH_RED):
-    f06 = open('./hand2optimal/hand2optdict_{}_{}.pickle'.format('06', dora), 'rb')
-    f09 = open('./hand2optimal/hand2optdict_{}_{}.pickle'.format('09', dora), 'rb')
+    path06 = f'{dirpath}hand2optimal/hand2optdict_06_{dora}.pickle'
+    path09 = f'{dirpath}hand2optimal/hand2optdict_09_{dora}.pickle'
+    f06 = open(path06, 'rb')
+    f09 = open(path09, 'rb')
     hand_to_optimal_dicts06.append(pickle.load(f06))
     hand_to_optimal_dicts09.append(pickle.load(f09))
 
@@ -60,7 +66,7 @@ def hand2show_str(hand):
         show_str += '{} '.format(num)
     return show_str[:-1]
 
-def hand2plane(hand, mode):
+def hand2plane(hand, mode, dora=None):
     if mode == 1:
         plane = np.zeros(shape=(NUM_SAME_TILE, KIND_TILE_WITH_RED))
         for tile in range(KIND_TILE_WITH_RED):
@@ -78,6 +84,62 @@ def hand2plane(hand, mode):
                 #print(hand.count(tile))
                 if hand.count(tile) > 0:
                     plane[3, tile // 2] = 1
+    elif mode == 3:
+        # almost the same as mode 2, but add zero padding to 發 and 中
+        plane = np.zeros(shape=(NUM_SAME_TILE, KIND_TILE+2))
+        for tile in range(KIND_TILE_WITH_RED):
+            if tile == 18 or tile == 19:
+                #print(tile)
+                plane[4-hand.count(tile):4, 2 * tile - 26] = 1
+            elif tile % 2 == 0:
+                #print(hand.count(tile))
+                plane[3-hand.count(tile):3, tile // 2] = 1
+            else:
+                #print(hand.count(tile))
+                if hand.count(tile) > 0:
+                    plane[3, tile // 2] = 1
+    elif mode == 4:
+        plane = np.zeros(shape=(NUM_SAME_TILE+1, KIND_TILE+2))
+        for tile in range(KIND_TILE_WITH_RED):
+            if tile == 18:
+                plane[0:hand.count(tile), 10] = 1
+            elif tile == 19:
+                plane[0:hand.count(tile), 12] = 1
+                if hand.count(tile) >= 1:
+                    plane[4, 12] = 1
+            elif tile % 2 == 0:
+                pass
+            else:
+                num_tile = hand.count(tile-1) + hand.count(tile)
+                plane[0:num_tile, tile//2] = 1
+                if hand.count(tile) >= 1:
+                    plane[4, tile//2] = 1
+    elif mode == 5:
+        # tile(column)
+        # 0-8:sozu, 9:blank, 10:發, 11:blank, 12:中
+        # pieces(row)
+        # 0-3: 0 0 0 0, 1 0 0 0, 1 1 0 0, 1 1 1 0, 1 1 1 1 -> piece pattern
+        # 4:has red, 5:is dora, 6:dora is red, 7:is blank
+        plane = np.zeros(shape=(KIND_TILE+2, NUM_SAME_TILE+4))
+        for tile in range(KIND_TILE + 2):
+            plane[tile, 7] = 1
+            if tile == 9 or tile == 11: # not used number
+                plane[tile, 7] = 0
+                continue
+            elif tile == 10 or tile == 12:
+                tno = 18 + (tile - 10) // 2
+                if tno == dora:
+                    plane[tile, 6] = 1
+                plane[tile, 0:hand.count(tno)] = 1
+            else:
+                tno = tile * 2
+                if hand.count(tno + 1) > 0:
+                    plane[tile, 4] = 1
+                if tno == dora or tno + 1 == dora:
+                    plane[tile, 5] = 1
+                if tno + 1 == dora:
+                    plane[tile, 6] = 1
+                plane[tile, 0:(hand.count(tno) + hand.count(tno + 1))] = 1
     return plane
 
 def hand2hist(hand):
@@ -283,7 +345,7 @@ def plane2hand(plane, mode):
         for i in range(KIND_TILE_WITH_RED):
             for j in range(int(plane[:, i].sum())):
                 hand.append(i)
-    if mode == 2:
+    elif mode == 2:
         for i in range(KIND_TILE):
             if i <= 8:
                 #print(int(plane[1:, i].sum()))
@@ -294,6 +356,39 @@ def plane2hand(plane, mode):
             else:
                 for j in range(int(plane[:, i].sum())):
                     hand.append(i+9)
+    elif mode == 3:
+        for i in range(KIND_TILE+2):
+            if i <= 8:
+                #print(int(plane[1:, i].sum()))
+                for j in range(int(plane[:3, i].sum())):
+                    hand.append(i * 2)
+                if plane[3, i] == 1:
+                    hand.append(i * 2 + 1)
+            elif i == 9 or i == 11:
+                continue
+            elif i == 10:
+                for j in range(int(plane[:, i].sum())):
+                    hand.append(18)
+            elif i == 12:
+                for j in range(int(plane[:, i].sum())):
+                    hand.append(19)
+    elif mode == 4:
+        for i in range(KIND_TILE+2):
+            num_tile = int(plane[:4, i].sum())
+            if i == 10:
+                for j in range(num_tile):
+                    hand.append(18)
+            elif i == 12:
+                for j in range(num_tile):
+                    hand.append(19)
+            else:
+                if plane[4, i] == 1:
+                    for j in range(num_tile-1):
+                        hand.append(2*i)
+                    hand.append(2*i+1)
+                else:
+                    for j in range(num_tile):
+                        hand.append(2*i)
     return hand
 
 def sort_by_dealer(num_players, first_dealer_num, same_ranks):
@@ -414,3 +509,21 @@ def round_point2vec(round_point):
         vec[11+idx] = 1
     return vec
     
+def discards2exist_plane(discards, players, mode=1):
+    if mode == 1:
+        exist_plane = []
+        for player in players:
+            exist_vec = [0] * (KIND_TILE+2)
+            for tile in range(KIND_TILE_WITH_RED):
+                if tile == 18:
+                    if tile in discards[player]:
+                        exist_vec[10] = 1
+                elif tile == 19:
+                    if tile in discards[player]:
+                        exist_vec[12] = 1
+                elif tile % 2 == 0:
+                    if tile in discards[player] or tile+1 in discards[player]:
+                        exist_vec[tile // 2] = 1
+            exist_plane.append(exist_vec)
+        return np.array(exist_plane).T
+

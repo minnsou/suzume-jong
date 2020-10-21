@@ -12,9 +12,11 @@ folder description
 
 `hand2optimal/` npy or pickle files to get optimal discard tiles
 
-`mahjong_networks.py` difine custom network(mlp, conv1d, conv2d)
+`mahjong_networks.py` define custom network(mlp, conv1d, conv2d, resnet)
 
 `mahjong_utils.py` suzume-jan utility function such as is_win, calc_point and so on
+
+`reward_predict.py` make global reward predictor
 
 `suzume_env/` Suzume-jan envirionment
 
@@ -30,29 +32,35 @@ OpenAI baselines, tensorflow==1.14, keras
 
 - test baseline player and save the result to `baseline_results` dir
 
-`python baseline_run.py [-p num_player] [-t total_timesteps] [-og opponent_gamma] [-pg player_gamma] [-rs reward_scale] [-pr]`
+`python baseline_run.py [-p NUM_PLAYER] [-t TOTAL_TIMESTEPS] [-og OPPONENT_PLAYER_GAMMA] [-pg PLAYER_GAMMA] [-rs REWARD_SCALE] [-pr]`
 
 `python baseline_run.py -p 2 -t 300000 -og 09 -pg random -rs 20 -ps`
 
 - show the result 
 
-`python baseline_run.py [-l pickle_name]`
+`python baseline_run.py [-l PICKLE_NAME]`
 
 `python baseline_run.py -l baseline_results/2_09_09_3000000.pickle`
 
 - train ppo algorithm
 
-`python train_ppo.py [--env env_name] [--save_path pickle_path] [-t num_timesteps]`
+`python train_ppo.py [--env ENV_NAME] [--save_path PICKLE_PATH] [-t NUM_TIMESTEPS]`
 
 `python train_ppo.py --env Suzume2-v0 --save_path save_models/default.pkl -t 30000`
 
 - show result (when --play, set num_timesteps to 0 and num_env to 1)
 
-`python train_ppo.py --play [--load_path path]`
+`python train_ppo.py --play [--load_path MODEL_PATH]`
 
 `python train_ppo.py --play --load_path save_models/ppo_2_5_1_99.pkl --pickle_name 09`
 
 for more details, run `python train_ppo.py -h`
+
+- make global reward predictor (save results to `save_rew_pred` dir)
+
+`python reward_predict.py [-p NUM_PLAYERS] [-pg PLAYER_GAMMA] [-og OPPOPNENT_GAMMA] [-m MODEL_NAME] [--play]`
+
+`python reward_predict.py -m dense`
 
 ## License
 

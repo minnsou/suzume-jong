@@ -6,8 +6,8 @@ register(
     kwargs = {
         'num_players':2,
         'gamma_str':'09',
-        'obs_mode':4,
-        'has_dealer':False,
+        'obs_mode':6,
+        'has_dealer':True,
         'pseudo_reward':False,
         'reward_scale':20,
         'reward_mode':1,
@@ -23,7 +23,7 @@ register(
     kwargs = {
         'num_players':2,
         'gamma_str':'09',
-        'obs_mode':6,
+        'obs_mode':10,
         'has_dealer':True, # fix
         'pseudo_reward':False,
         'reward_scale':1000,
@@ -44,11 +44,11 @@ register(
     kwargs = {
         'num_players':2,
         'gamma_str':'09',
-        'obs_mode':6,
+        'obs_mode':10,
         'has_dealer':True, # fix
         'pseudo_reward':False,
         'reward_scale':1000,
-        'reward_mode':1,
+        'reward_mode':1, # anything is OK
         'do_complete_game':True, # fix
         'rank_reward_scale':1000,
         'numpy_seed':0,

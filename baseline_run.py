@@ -2,16 +2,20 @@ import pickle
 import random
 import argparse
 from copy import deepcopy
+import copy
 import json
 import pprint
 import datetime
 import os
 
+import deepq
 import numpy as np
+from keras.models import load_model
 
 from suzume_env.main import SuzumeEnv
 import mahjong_networks
 import mahjong_utils
+from mahjong_utils import dirpath
 
 def show_result(count_dict):
     #total_kyoku = 0
@@ -48,6 +52,8 @@ def show_result(count_dict):
               round(np.var(count_dict['rank']), 4),
             )
         )
+        print(count_dict['rank'].count(1)) # number of 1st
+        print(count_dict['rank'].count(2)) # number of 2nd
         print('total game', count_dict['num_game'])
     print('total kyoku', count_dict['num_kyoku'])
     #print('total_kyoku', total_kyoku)
@@ -62,7 +68,6 @@ def info_count(count_dict, info, do_complete_game, num_players):
                 key_str = 'win_' + info[i]['info']['type']
                 count_dict[key_str].append(info[i]['info']['point'])
             elif info[i]['info']['type'] == 'tumo':
-                #print(num_players)
                 point = - info[i]['info']['point'] / (num_players - 1)
                 count_dict['lose_tumo'].append(point)
             elif info[i]['info']['lose_player'] == 'player0':
@@ -144,6 +149,19 @@ def make_count_dict(
     if do_complete_game:
         count_dict['rank'] = []
         count_dict['num_game'] = 0
+
+    models = []
+    for dora in range(mahjong_utils.KIND_TILE_WITH_RED):
+        if player_gamma[:7] == 'dense09':
+            model = f'{dirpath}supervised_learning/models/dense2_09_{dora}.h5'
+        elif player_gamma == 'cnn':
+            model = f'{dirpath}supervised_learning/models/cnn_09_{dora}.h5'
+        elif player_gamma[:6] == 'resnet':
+            model = f'{dirpath}supervised_learning/models/{player_gamma}_09_{dora}.h5'
+        else:
+            break
+        print(model)
+        models.append(load_model(model))
     
     done = True
     #rewards = [] # if want to show reward ave, remove #
@@ -162,9 +180,31 @@ def make_count_dict(
                     "timesteps": total_timesteps,
                 },
             }
+        # for RL
         if player_gamma[:3] == 'ppo':
             actions, _, _, _ = model.step(obs)
             discard_tile = actions[0]
+        # for SL
+        elif player_gamma[:5] == 'dense':
+            # assert obs_mode == 6
+            dora = mahjong_utils.plane2hand(obs[3], 2)[0]
+            hand = obs[4+2*num_players].reshape(1, 4, 11)
+            discard_tile = np.argmax(models[dora].predict(hand))
+            # print(hand)
+            # print(dora)
+            # print(discard_tile)
+        # for SL
+        elif player_gamma[:3] == 'cnn' or player_gamma[:6] == 'resnet':
+            # assert obs_mode == 6
+            dora = mahjong_utils.plane2hand(obs[3], 2)[0]
+            # first
+            #hand = obs[4+2*num_players].reshape(1, 4, 11, 1)
+            # conv1d resnet
+            #hand = obs[4+2*num_players].reshape(1, 4, 11)
+            # conv1d + mode3 resnet
+            hand_list = mahjong_utils.plane2hand(obs[4+2*num_players], mode=2)
+            hand = mahjong_utils.hand2plane(hand_list, mode=3).reshape(1, 4, 13)
+            discard_tile = np.argmax(models[dora].predict(hand.transpose(0, 2, 1)))
         else:
             dora = np.argmax(obs['dora'])
             hand = mahjong_utils.plane2hand(obs['hand'], obs_mode)
@@ -221,7 +261,12 @@ def make_count_dict(
             #pprint.pprint(log, width=200)
             now = str(datetime.datetime.today())
             now = now.replace(' ', '_')
-            dirname = f'./log_json/{num_players}_{player_gamma}_{opponent_gamma}'
+            dirname = '{}log_json/{}_{}_{}'.format(
+                dirpath,
+                num_players,
+                player_gamma,
+                opponent_gamma,
+            )
             os.makedirs(dirname, exist_ok=True)
             name_str = '{}/{}_{}_{}_{}.json'.format(
                 dirname,
@@ -281,6 +326,7 @@ def main():
     parser.add_argument("-rs", "--reward_scale", help="reward divide by reward_scale (default 20)", type=int, default=20)
     parser.add_argument('-dc', "--do_complete_game", help="whether play complete game or not (default False)", default=False, action='store_true')
     parser.add_argument("-ns", "--numpy_seed", help="numpy random seed (default 0)", type=int, default=0)
+    parser.add_argument("-em", "--eval_mode", help="if True, when no discard tile in hand, discard random tile (default False)", default=False, action='store_true')
 
     args = parser.parse_args()
     if args.do_complete_game:
@@ -294,7 +340,7 @@ def main():
             show_result(count_dict)
     else:
         env = SuzumeEnv(
-            process_idx=0,
+            #process_idx=0,
             num_players=args.num_players,
             gamma_str=args.opponent_gamma,
             obs_mode=args.obs_mode,
@@ -305,6 +351,7 @@ def main():
             do_complete_game=args.do_complete_game,
             # rank_reward_scale=args.rank_reward_scale,
             numpy_seed=args.numpy_seed,
+            eval_mode=args.eval_mode,
             debug=False,
         )
 

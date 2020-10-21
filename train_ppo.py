@@ -35,22 +35,23 @@ def common_arg_parser():
     parser.add_argument('-t', '--num_timesteps', type=float, default=1e6),
     parser.add_argument('--network', help='network type (mlp, cnn, lstm, cnn_lstm, conv_only)', default=None)
     parser.add_argument('--gamestate', help='game state to load (so far only used in retro games)', default=None)
-    parser.add_argument('--num_env', help='Number of environment copies being run in parallel. When not specified, set to number of cpus for Atari, and to 1 for Mujoco', default=1, type=int)
+    parser.add_argument('--num_env', help='Number of environment copies being run in parallel. When not specified, set to number of cpus for Atari, and to 1 for Mujoco', default=5, type=int)
     parser.add_argument('--reward_scale', help='Reward scale factor. Default: 1.0', default=1.0, type=float)
     parser.add_argument('--save_path', help='Path to save trained model to', default='save_models/default.pkl', type=str)
     parser.add_argument('--save_video_interval', help='Save video every x steps (0 = disabled)', default=0, type=int)
     parser.add_argument('--save_video_length', help='Length of recorded video. Default: 200', default=200, type=int)
     parser.add_argument('--log_path', help='Directory to save learning curve data.', default=None, type=str)
     parser.add_argument('--play', default=False, action='store_true')
+    # for --play
     parser.add_argument('-pn', '--pickle_name', help='name using pickle file(usually opponent gamma)', default='none', type=str)
     parser.add_argument('-dc', "--do_complete_game", help="whether play complete game or not (default False)", default=False, action='store_true')
-    parser.add_argument("-ns", "--numpy_seed", help="numpy random seed (default 0)", type=int, default=0)    
+    parser.add_argument("-ns", "--numpy_seed", help="numpy random seed (default 0)", type=int, default=0)
     return parser
 
 def path2vars(path):
     env_vars = re.findall(r'_(\d+_\d+_\d+_.*).pkl', path)
     if env_vars == []:
-        assert False, 'please set model name "{num_players}_{num_envs}_{obs_mode}_{exp_num}.pkl". for example "2_5_6_44.pkl"'
+        return '0', '0', '0'
     env_vars = env_vars[0].split('_')
     num_players = int(env_vars[0])
     obs_mode = int(env_vars[2])
@@ -58,11 +59,18 @@ def path2vars(path):
     print('num_players {} obs_mode {} name {}'.format(num_players, obs_mode, name))
     return num_players, obs_mode, name
 
+def configure_logger(log_path, **kwargs):
+    if log_path is not None:
+        logger.configure(log_path)
+    else:
+        logger.configure(**kwargs)
+
 def main(args):
     arg_parser = common_arg_parser()
     args, unknown_args = arg_parser.parse_known_args(args)
     extra_args = parse_cmdline_kwargs(unknown_args)
     print(args, extra_args)
+    configure_logger(args.log_path, format_strs=[])
 
     if args.play:
         args.num_timesteps = 0
@@ -139,7 +147,6 @@ def main(args):
                     print(info[0][i])
             else:
                 print(info)
-
             # if info[0]['is_win']:
             #     print('info ', end='')
             #     print(info[0]['info']['type'])
@@ -173,7 +180,7 @@ def main(args):
             player_gamma=player_gamma,
             opponent_gamma=args.pickle_name,
             total_timesteps=total_timesteps,
-            obs_mode=2,
+            obs_mode=2, # anything is OK
             num_players=num_players,
             do_complete_game=args.do_complete_game,
             numpy_seed=args.numpy_seed,
